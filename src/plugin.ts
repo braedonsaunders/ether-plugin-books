@@ -10,6 +10,7 @@ import {
   reconcileStoredCatalog,
   resetCatalogCachesForUpgrade,
 } from "./curated.ts";
+import { comicsChildren, comicsEnabled, comicsItemDetail, comicsSeriesItems } from "./comics.ts";
 import { matchKindCandidates, resolveKindItem, runPrepareJob } from "./resolver.ts";
 import { rethrowIfHostFault } from "./text.ts";
 import type {
@@ -41,7 +42,7 @@ function errorResp(status: number, code: string, message: string): PluginRespons
   return jsonResp(status, { error: { code, message } });
 }
 
-const PLUGIN_VERSION = "1.0.6";
+const PLUGIN_VERSION = "1.1.0";
 const CHANGES_REV = "v6";
 
 function mergeCatalogUpserts(
@@ -101,14 +102,14 @@ function paginateItems(
 
 function parseKindRoute(
   path: string,
-): { kind: "books" | "audiobooks"; action: string; itemId?: string } | null {
+): { kind: "books" | "audiobooks" | "comics"; action: string; itemId?: string } | null {
   const prefix = "/ether/v1/kinds/";
   if (!path.startsWith(prefix)) return null;
   const rest = path.slice(prefix.length);
   const parts = rest.split("/").filter(Boolean);
   if (parts.length < 2) return null;
   const kind = parts[0];
-  if (kind !== "books" && kind !== "audiobooks") return null;
+  if (kind !== "books" && kind !== "audiobooks" && kind !== "comics") return null;
   if (parts[1] === "items" && parts.length >= 3) {
     return { kind, action: "item", itemId: decodeURIComponent(parts.slice(2).join("/")) };
   }
@@ -126,7 +127,7 @@ export function handle(req: PluginRequest): PluginResponse {
         status: "ok",
         plugin: "ether.books",
         version: PLUGIN_VERSION,
-        kinds: ["books", "audiobooks"],
+        kinds: ["books", "audiobooks", "comics"],
       });
     }
 
@@ -166,6 +167,40 @@ export function handle(req: PluginRequest): PluginResponse {
     }
 
     const { kind, action, itemId } = route;
+
+    // Comics & Manga: one card per series at the top level, its volumes or
+    // issues inside it. Resolve and match use the shared book paths, which
+    // pick the comics queries and scoring for comics items.
+    if (kind === "comics") {
+      if (action === "resolve") {
+        return jsonResp(200, resolveKindItem(parseBody<KindResolveRequest>(req), settings));
+      }
+      if (action === "match") {
+        return jsonResp(200, matchKindCandidates(parseBody<KindMatchRequest>(req), settings));
+      }
+      if (action === "browse") {
+        const body = parseBody<KindBrowseRequest>(req);
+        if (!comicsEnabled(settings)) return jsonResp(200, { items: [] });
+        if (body.parentId) {
+          return jsonResp(
+            200,
+            paginateItems(comicsChildren(String(body.parentId), settings), body.cursor, body.limit),
+          );
+        }
+        return jsonResp(200, paginateItems(comicsSeriesItems(settings), body.cursor, body.limit));
+      }
+      if (action === "item" && itemId) {
+        const detail = comicsEnabled(settings) ? comicsItemDetail(itemId, settings) : null;
+        return detail
+          ? jsonResp(200, detail)
+          : errorResp(404, "not_found", `Item ${itemId} not found`);
+      }
+      // No delta feed: Ether re-walks the cached list and keeps unchanged items by etag.
+      if (action === "changes") {
+        return errorResp(501, "not_implemented", "Comics are re-listed on each refresh.");
+      }
+      return errorResp(404, "not_found", `Unsupported comics action: ${action}`);
+    }
 
     if (action === "browse") {
       const body = parseBody<KindBrowseRequest>(req);

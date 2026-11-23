@@ -1,8 +1,8 @@
 {
   "id": "ether.books",
-  "version": "1.0.6",
+  "version": "1.1.0",
   "name": "Books and audiobooks",
-  "description": "Adds Books and Audiobooks libraries powered by Open Library, Hardcover, Audible catalog metadata, Standard Ebooks and LibriVox, with free public-domain reading and listening plus release matching through configured sources.",
+  "description": "Adds Books, Audiobooks and Comics & Manga libraries powered by Open Library, Hardcover, Audible catalog metadata, Standard Ebooks, LibriVox, AniList, MangaUpdates and Metron, with free public-domain reading and listening plus release matching through configured sources.",
   "ether": {
     "protocol": 1,
     "kind": "content",
@@ -23,10 +23,13 @@
         "archive.org",
         "*.archive.org",
         "gutendex.com",
-        "www.gutenberg.org"
+        "www.gutenberg.org",
+        "graphql.anilist.co",
+        "api.mangaupdates.com",
+        "metron.cloud"
       ],
       "sources": "search",
-      "secrets": ["hardcover_token"]
+      "secrets": ["hardcover_token", "metron_password"]
     },
     "runtime": {
       "kind": "hosted",
@@ -670,6 +673,212 @@
           "match": {
             "thresholdDefault": 0.65
           }
+        },
+        {
+          "browse": {
+            "facets": [
+              "authors",
+              "series",
+              "genres",
+              "type",
+              "source",
+              "year",
+              "rating"
+            ],
+            "liveSearch": false,
+            "search": true,
+            "searchFields": ["authors", "series", "genres"],
+            "sorts": ["title", "added", "released", "year", "rating", "index"]
+          },
+          "fields": [
+            {
+              "indexed": true,
+              "key": "authors",
+              "label": "$t:field.authors",
+              "type": "people"
+            },
+            {
+              "indexed": true,
+              "key": "series",
+              "label": "$t:field.series",
+              "type": "string"
+            },
+            {
+              "key": "series_number",
+              "label": "$t:field.volume",
+              "type": "string"
+            },
+            {
+              "indexed": true,
+              "key": "genres",
+              "label": "$t:field.genres",
+              "type": "strings"
+            },
+            {
+              "enum": ["Manga", "Manhwa", "Manhua", "Comic"],
+              "indexed": true,
+              "key": "type",
+              "label": "$t:field.type",
+              "type": "enum"
+            },
+            {
+              "enum": ["CBZ", "PDF", "EPUB"],
+              "indexed": true,
+              "key": "format",
+              "label": "$t:field.format",
+              "type": "enum"
+            },
+            {
+              "enum": ["AniList", "MangaUpdates", "Metron"],
+              "indexed": true,
+              "key": "source",
+              "label": "$t:field.source",
+              "type": "enum"
+            },
+            {
+              "indexed": true,
+              "key": "language",
+              "label": "$t:field.language",
+              "type": "string"
+            },
+            {
+              "key": "release_date",
+              "label": "$t:field.release_date",
+              "type": "string"
+            }
+          ],
+          "key": "comics",
+          "label": "$t:kind.comics.label",
+          "levels": [
+            {
+              "key": "series",
+              "label": "$t:level.series",
+              "container": true,
+              "role": "series"
+            },
+            {
+              "key": "volume",
+              "label": "$t:level.volume",
+              "playable": true,
+              "role": "book"
+            }
+          ],
+          "library": {
+            "card": "poster",
+            "dateDisplay": "year",
+            "icon": "assets/icon.svg",
+            "name": "$t:kind.comics.library",
+            "shelves": [
+              {
+                "direction": "desc",
+                "key": "top-rated",
+                "label": "$t:shelf.top_rated",
+                "sort": "rating"
+              },
+              {
+                "direction": "desc",
+                "facet": "type",
+                "key": "manga",
+                "label": "Manga",
+                "sort": "rating",
+                "value": "Manga"
+              },
+              {
+                "direction": "desc",
+                "facet": "type",
+                "key": "manhwa",
+                "label": "Manhwa",
+                "sort": "rating",
+                "value": "Manhwa"
+              },
+              {
+                "direction": "desc",
+                "facet": "type",
+                "key": "comics",
+                "label": "Comics",
+                "sort": "released",
+                "value": "Comic"
+              }
+            ],
+            "tabs": [
+              { "key": "home", "kind": "recommended", "label": "$t:tab.home" },
+              { "key": "browse", "kind": "library", "label": "$t:tab.browse" },
+              {
+                "direction": "asc",
+                "facet": "series",
+                "key": "series",
+                "kind": "collections",
+                "label": "$t:tab.series",
+                "order": "count",
+                "searchPlaceholder": "$t:search.series",
+                "sort": "index"
+              },
+              {
+                "direction": "desc",
+                "facet": "type",
+                "key": "types",
+                "kind": "collections",
+                "label": "$t:tab.types",
+                "order": "name",
+                "searchPlaceholder": "$t:search.types",
+                "sort": "rating"
+              },
+              {
+                "direction": "desc",
+                "facet": "genres",
+                "key": "genres",
+                "kind": "collections",
+                "label": "$t:tab.genres",
+                "order": "count",
+                "searchPlaceholder": "$t:search.genres",
+                "sort": "rating"
+              },
+              {
+                "direction": "desc",
+                "filters": {
+                  "match": "all",
+                  "rules": [
+                    { "field": "viewer", "op": "is", "value": { "history": true } }
+                  ]
+                },
+                "key": "history",
+                "kind": "view",
+                "label": "$t:tab.history",
+                "layout": "timeline",
+                "searchPlaceholder": "$t:search.reading_history",
+                "sort": "lastViewed"
+              },
+              {
+                "direction": "desc",
+                "filters": {
+                  "match": "all",
+                  "rules": [
+                    {
+                      "field": "viewer",
+                      "op": "is",
+                      "value": { "watchlist": true }
+                    }
+                  ]
+                },
+                "key": "to-read",
+                "kind": "view",
+                "label": "$t:tab.to_read",
+                "layout": "grid",
+                "searchPlaceholder": "$t:search.to_read",
+                "sort": "added"
+              }
+            ]
+          },
+          "match": { "thresholdDefault": 0.65 },
+          "media": "book",
+          "present": {
+            "mediaBrowser": {
+              "collectionType": "books",
+              "itemTypes": { "series": "Series", "volume": "Book" }
+            },
+            "vela": { "type": "movies" }
+          },
+          "sync": { "mode": "pull", "refresh": "6h" }
         }
       ]
     }

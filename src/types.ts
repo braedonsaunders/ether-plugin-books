@@ -332,4 +332,16 @@ export interface PluginSettings {
   preferUnabridged: boolean;
   preferCached: boolean;
   contactEmail: string;
+  // Comics & Manga (comics.ts)
+  enableManga: boolean;
+  mangaTitles: number;
+  mangaOrder: string;
+  includeAdultManga: boolean;
+  enableMangaUpdates: boolean;
+  volumesPerSeries: number;
+  metronUser: string;
+  metronPassword: string;
+  comicSeries: string[];
+  comicNewWeeks: number;
+  comicsCategories: string;
 }

@@ -1,6 +1,6 @@
 # Books and audiobooks (`ether.books`)
 
-Ether content plugin providing dedicated **Books** (`media: "book"`) and **Audiobooks** (`media: "audiobook"`) libraries.
+Ether content plugin providing dedicated **Books** (`media: "book"`), **Audiobooks** (`media: "audiobook"`) and **Comics & Manga** (`media: "book"`) libraries.
 
 ## Features
 
@@ -16,6 +16,11 @@ Ether content plugin providing dedicated **Books** (`media: "book"`) and **Audio
   - Prefers direct public-domain files when available.
   - Searches configured Ether indexers (`7000,7020` for books, `3030` for audiobooks), checks debrid cache, inspects `release_files` to select exact `.epub` / `.cbz` / `.pdf` or `.m4b` / ordered `.mp3` files with explicit `file` / `fileIndex` / `fileHint`, and rejects abridged releases when unabridged editions are requested.
   - Supports `/ether/job/prepare` slow resolution when deep file inspection exceeds the 5-second `/resolve` deadline.
+- **Comics & Manga library** (optional, on by default for manga):
+  - One card per series; its volumes (manga) or issues (comics) sit inside it, like an album's tracks. Jellyfin and Emby show a series as a Series with its books inside.
+  - Manga, manhwa and manhua from AniList (no key), with volume counts for ongoing series filled in from MangaUpdates.
+  - Western comics from Metron (free account: `metron_username` and the `metron_password` secret): the series you follow and the newest issues.
+  - Volumes are found through Ether's indexers in the comics category (`7030` by default). A release must start with the series name and give the wanted volume right after it, so spin-offs ("Attack on Titan - Before the Fall v12"), other editions, multi-volume packs and chapter releases are rejected.
 - **Incremental sync (`/changes`) & live facet expansion (`/expand`)**:
   - Keeps searched, expanded, and read/listened titles alive across syncs and hydrates full author, narrator, series, and genre catalogs on demand.
 

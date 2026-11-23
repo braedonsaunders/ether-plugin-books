@@ -42,6 +42,13 @@ export function readSettings(): PluginSettings {
   } catch (err) {
     rethrowIfHostFault(err);
   }
+  let metronPassword = "";
+  try {
+    const sec = ether.secret.get("metron_password");
+    if (typeof sec === "string") metronPassword = sec.trim();
+  } catch (err) {
+    rethrowIfHostFault(err);
+  }
   const boolVal = (k: string, def: boolean): boolean =>
     typeof raw[k] === "boolean" ? (raw[k] as boolean) : def;
   const strVal = (k: string, def: string): string =>
@@ -66,6 +73,25 @@ export function readSettings(): PluginSettings {
     preferUnabridged: boolVal("prefer_unabridged", true),
     preferCached: boolVal("prefer_cached", true),
     contactEmail: typeof raw["contact_email"] === "string" ? (raw["contact_email"] as string).trim() : "",
+    enableManga: boolVal("enable_manga", true),
+    mangaTitles: Math.max(20, Math.min(1000, Math.trunc(Number(raw["manga_titles"]) || 100))),
+    mangaOrder: ["popular", "trending", "newest"].includes(strVal("manga_order", "popular"))
+      ? strVal("manga_order", "popular")
+      : "popular",
+    includeAdultManga: boolVal("include_adult_manga", false),
+    enableMangaUpdates: boolVal("enable_mangaupdates", true),
+    volumesPerSeries: Math.max(1, Math.min(300, Math.trunc(Number(raw["volumes_per_series"]) || 50))),
+    metronUser: strVal("metron_username", ""),
+    metronPassword,
+    comicSeries: (Array.isArray(raw["comic_series"])
+      ? (raw["comic_series"] as unknown[])
+      : String(raw["comic_series"] || "").split(/[\n,]+/)
+    )
+      .map((x) => String(x || "").trim())
+      .filter(Boolean)
+      .slice(0, 100),
+    comicNewWeeks: Math.max(0, Math.min(12, Math.trunc(Number(raw["comic_new_weeks"] ?? 2)))),
+    comicsCategories: strVal("comics_categories", "7030"),
   };
 }
 

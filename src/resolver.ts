@@ -12,6 +12,7 @@ import {
   scoreCandidate,
   selectReleaseFiles,
 } from "./matching.ts";
+import { comicsQueries, comicsScore, isComicsItem } from "./comics.ts";
 import { fnv1aHex, rethrowIfHostFault } from "./text.ts";
 import type {
   KindItem,
@@ -31,6 +32,21 @@ const MAX_USENET_CHECKS = 3;
 interface UsenetCheckState {
   used: number;
   disabled: boolean;
+}
+
+// Comics and manga volumes search their own indexer category and use their
+// own release queries and scoring (comics.ts).
+function searchCategory(item: KindItem, kind: string, settings: PluginSettings): string {
+  if (isComicsItem(item)) return settings.comicsCategories;
+  return kind === "audiobooks" ? settings.audiobookCategories : settings.ebookCategories;
+}
+
+function queriesFor(item: KindItem): string[] {
+  return isComicsItem(item) ? comicsQueries(item) : buildSearchQueries(item);
+}
+
+function scoreFor(item: KindItem, cand: SourceCandidate, settings: PluginSettings) {
+  return isComicsItem(item) ? comicsScore(item, cand) : scoreCandidate(item, cand, settings);
 }
 
 function isUsenetOnlyCandidate(cand: SourceCandidate | undefined): boolean {
@@ -282,6 +298,13 @@ export function resolveKindItem(
     const alive: PlayableSource[] = [];
     for (const src of cached) {
       const rel = src.release;
+      // A pick made by an older matcher is checked again: a release the
+      // current rules reject (another series, another volume) is dropped.
+      const relTitle = rel?.candidate?.title;
+      if (relTitle && scoreFor(item, { ...rel.candidate, title: relTitle }, settings).rejected) {
+        droppedAny = true;
+        continue;
+      }
       if (rel?.nzbUrl && !rel.infoHash && !rel.magnet) {
         const probeCand: SourceCandidate = rel.candidate
           ? { ...rel.candidate, nzbUrl: rel.candidate.nzbUrl || rel.nzbUrl }
@@ -305,14 +328,17 @@ export function resolveKindItem(
   const startedAt = Date.now();
   const elapsed = () => Date.now() - startedAt;
   const meta = extractTargetMeta(item);
-  const category =
-    meta.kind === "audiobooks" ? settings.audiobookCategories : settings.ebookCategories;
-  const queries = buildSearchQueries(item);
+  const category = searchCategory(item, meta.kind, settings);
+  const queries = queriesFor(item);
 
   // 3. Search configured Ether indexers (stay tight within the 5s /resolve deadline)
   let allCandidates: SourceCandidate[] = [];
+  // Later queries run until enough candidates the matcher accepts were found:
+  // a first query full of rejects (another series' volume of the same number)
+  // must not stop the search before the form the right release uses.
+  let acceptable = 0;
   for (let qi = 0; qi < queries.length; qi++) {
-    if (qi > 0 && (allCandidates.length >= 3 || elapsed() > 1100)) break;
+    if (qi > 0 && (acceptable >= 3 || elapsed() > 1100)) break;
     const found = safeResolveSources({
       kind: "indexer_search",
       query: queries[qi],
@@ -320,6 +346,7 @@ export function resolveKindItem(
     });
     if (found.length > 0) {
       allCandidates.push(...found);
+      acceptable += found.filter((c) => !scoreFor(item, c, settings).rejected).length;
     }
   }
   allCandidates = dedupeCandidates(allCandidates);
@@ -351,7 +378,7 @@ export function resolveKindItem(
 
   // 5. Score & rank candidates
   const scored = allCandidates
-    .map((cand) => ({ cand, eval: scoreCandidate(item, cand, settings) }))
+    .map((cand) => ({ cand, eval: scoreFor(item, cand, settings) }))
     .filter((x) => !x.eval.rejected)
     .sort((a, b) => b.eval.score - a.eval.score);
 
@@ -438,15 +465,14 @@ export function runPrepareJob(
   if (!jobInput && item?.id) {
     // Run full indexer search + file inspection inside the generous job budget
     const meta = extractTargetMeta(item);
-    const category =
-      meta.kind === "audiobooks" ? settings.audiobookCategories : settings.ebookCategories;
+    const category = searchCategory(item, meta.kind, settings);
     const found: SourceCandidate[] = [];
-    for (const q of buildSearchQueries(item)) {
+    for (const q of queriesFor(item)) {
       found.push(...safeResolveSources({ kind: "indexer_search", query: q, category }));
     }
     const deduped = dedupeCandidates(found);
     const scored = deduped
-      .map((cand) => ({ cand, eval: scoreCandidate(item, cand, settings) }))
+      .map((cand) => ({ cand, eval: scoreFor(item, cand, settings) }))
       .filter((x) => !x.eval.rejected)
       .sort((a, b) => b.eval.score - a.eval.score)
       .slice(0, 8)
@@ -497,7 +523,7 @@ export function matchKindCandidates(
   }
 
   const matches = candidates.map((cand, idx) => {
-    const res = scoreCandidate(item, cand, settings);
+    const res = scoreFor(item, cand, settings);
     return {
       candidateRef: candidateRefOf(cand, idx),
       score: res.rejected ? 0 : res.score,

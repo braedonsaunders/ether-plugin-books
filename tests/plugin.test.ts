@@ -27,6 +27,8 @@ import {
 } from "../src/hygiene.ts";
 import { entryToKindItem, mergeEntries, reconcileStoredCatalog } from "../src/curated.ts";
 import { handle } from "../src/plugin.ts";
+import { comicsMatch, comicsScore } from "../src/comics.ts";
+import { storePreparedSources } from "../src/cache.ts";
 import type {
   EtherHttpRequest,
   EtherHttpResponse,
@@ -1951,3 +1953,241 @@ describe("1.0.6 audiobook duplicate collapse & canonicalWorkTitle (1.0.8 fixes)"
     );
   });
 });
+
+describe("Comics & Manga: series cards with volumes inside, strict volume matching", () => {
+  // Two AniList titles: a 3-volume manga and a one-shot with no volume count.
+  const anilistPage = {
+    data: {
+      Page: {
+        pageInfo: { hasNextPage: false },
+        media: [
+          {
+            id: 53390,
+            title: { romaji: "Shingeki no Kyojin", english: "Attack on Titan" },
+            synonyms: [],
+            countryOfOrigin: "JP",
+            status: "FINISHED",
+            volumes: 3,
+            startDate: { year: 2009 },
+            genres: ["Action"],
+            coverImage: { extraLarge: "https://s4.anilist.co/file/aot.jpg" },
+            description: "Walls.",
+            averageScore: 84,
+            isAdult: false,
+            staff: { edges: [{ role: "Story & Art", node: { name: { full: "Hajime Isayama" } } }] },
+          },
+          {
+            id: 1,
+            title: { romaji: "Hitori", english: null },
+            synonyms: [],
+            countryOfOrigin: "KR",
+            status: "FINISHED",
+            volumes: null,
+            startDate: { year: 2020 },
+            genres: [],
+            coverImage: {},
+            description: "",
+            averageScore: 0,
+            isAdult: false,
+            staff: { edges: [] },
+          },
+        ],
+      },
+    },
+  };
+
+  const call = (path: string, body: unknown) => {
+    const resp = handle({ method: "POST", path, headers: {}, body: JSON.stringify(body) });
+    const raw = resp.body as unknown;
+    return { status: resp.status, body: (typeof raw === "string" ? JSON.parse(raw) : raw) as any };
+  };
+
+  beforeEach(() => {
+    installMockHost({
+      settings: { enable_manga: true, enable_mangaupdates: false, manga_titles: 20 },
+      httpHandler: (req) =>
+        req.url.includes("graphql.anilist.co")
+          ? { status: 200, body: JSON.stringify(anilistPage) }
+          : { status: 404, body: "" },
+    });
+  });
+
+  it("lists one series card per title at the top level and its volumes inside", () => {
+    const top = call("/ether/v1/kinds/comics/browse", { limit: 50 });
+    assert.equal(top.status, 200);
+    const series = top.body.items as KindItem[];
+    assert.deepEqual(
+      series.map((s) => [s.id, s.level, s.title, s.childCount]),
+      [
+        ["al53390", "series", "Attack on Titan", 3],
+        ["al1", "series", "Hitori", 1],
+      ],
+    );
+    assert.ok(series.every((s) => !s.playable));
+
+    const vols = call("/ether/v1/kinds/comics/browse", { parentId: "al53390", limit: 50 }).body
+      .items as KindItem[];
+    assert.deepEqual(
+      vols.map((v) => [v.id, v.level, v.parentId, v.title, v.playable]),
+      [
+        ["al53390-v1", "volume", "al53390", "Attack on Titan Vol. 1", true],
+        ["al53390-v2", "volume", "al53390", "Attack on Titan Vol. 2", true],
+        ["al53390-v3", "volume", "al53390", "Attack on Titan Vol. 3", true],
+      ],
+    );
+
+    // A title without a volume count is one book inside its series card.
+    const one = call("/ether/v1/kinds/comics/browse", { parentId: "al1", limit: 50 }).body
+      .items as KindItem[];
+    assert.deepEqual(one.map((v) => [v.id, v.title]), [["al1-v1", "Hitori"]]);
+
+    assert.equal(call("/ether/v1/kinds/comics/items/al53390", {}).body.title, "Attack on Titan");
+    assert.equal(
+      call("/ether/v1/kinds/comics/items/al53390-v2", {}).body.title,
+      "Attack on Titan Vol. 2",
+    );
+  });
+
+  it("accepts only the wanted volume of the wanted series", () => {
+    const vols = call("/ether/v1/kinds/comics/browse", { parentId: "al53390", limit: 50 }).body
+      .items as KindItem[];
+    const v2 = vols[1];
+    const cases: Array<[string, string]> = [
+      ["Attack on Titan v02 (2012) (Digital) (danke-Empire).cbz", ""],
+      ["Attack on Titan Vol. 2 (Digital)", ""],
+      ["Attack on Titan 002 (Digital).cbz", ""],
+      ["Attack on Titan - Before the Fall v02 (2017) (Digital).cbz", "volume number missing"],
+      ["Attack on Titan Colossal Edition v02 (Digital)", "volume number missing"],
+      ["Attack on Titan v02-v05 (Digital)", "several volumes"],
+      ["Attack on Titan v03 (Digital).cbz", "different volume (3)"],
+      ["Attack on Titan c008 (Digital)", "chapter release, not a volume"],
+      ["Spoof Attack on Titan v02 (Digital)", "series title does not match"],
+      ["Kodansha.-.Attack.On.Titan.02.2021.Hybrid.Comic.eBook-BitBook", ""],
+      ["Kodansha.-.Attack.On.Titan.Before.The.Fall.02.2021.Hybrid.Comic.eBook-BitBook", "volume number missing"],
+      ["Kodansha.-.Attack.On.Titan.03.2021.Hybrid.Comic.eBook-BitBook", "different volume (3)"],
+    ];
+    for (const [name, why] of cases) {
+      assert.equal(comicsMatch(v2, name), why, name);
+    }
+    const best = comicsScore(v2, { title: cases[0][0], nzbUrl: "https://ix.test/1" });
+    assert.equal(best.rejected, false);
+    assert.ok(best.score > 0.9);
+    assert.equal(comicsScore(v2, { title: cases[3][0] }).rejected, true);
+  });
+
+  it("searches the comics category and ranks the right volume first", () => {
+    const queries: Array<{ query: string; category?: string }> = [];
+    installMockHost({
+      settings: { enable_manga: true, enable_mangaupdates: false, manga_titles: 20 },
+      httpHandler: (req) =>
+        req.url.includes("graphql.anilist.co")
+          ? { status: 200, body: JSON.stringify(anilistPage) }
+          : { status: 404, body: "" },
+      sourcesHandler: (q) => {
+        if (q.kind === "indexer_search") {
+          queries.push({ query: String(q.query), category: q.category as string | undefined });
+          return [
+            { title: "Attack on Titan - Before the Fall v02 (2017) (Digital).cbz", nzbUrl: "https://ix.test/a", size: 9e7 },
+            { title: "Attack on Titan v02 (2012) (Digital) (danke-Empire).cbz", nzbUrl: "https://ix.test/b", size: 2e8 },
+          ];
+        }
+        return [];
+      },
+    });
+    const vols = call("/ether/v1/kinds/comics/browse", { parentId: "al53390", limit: 50 }).body
+      .items as KindItem[];
+    const m = call("/ether/v1/kinds/comics/match", {
+      item: vols[1],
+      candidates: [
+        { title: "Attack on Titan - Before the Fall v02 (2017) (Digital).cbz", nzbUrl: "https://ix.test/a" },
+        { title: "Attack on Titan v02 (2012) (Digital) (danke-Empire).cbz", nzbUrl: "https://ix.test/b" },
+      ],
+    }).body.matches as Array<{ candidateRef: string; score: number }>;
+    assert.ok(m[0].score > 0.9);
+    assert.equal(m[1].score, 0);
+    call("/ether/v1/kinds/comics/resolve", { item: vols[1] });
+    assert.ok(queries.length > 0);
+    assert.ok(queries.every((q) => q.category === "7030"), JSON.stringify(queries));
+  });
+
+  it("keeps searching when the first query finds only rejected releases", () => {
+    const asked: string[] = [];
+    installMockHost({
+      settings: { enable_manga: true, enable_mangaupdates: false, manga_titles: 20 },
+      httpHandler: (req) =>
+        req.url.includes("graphql.anilist.co")
+          ? { status: 200, body: JSON.stringify(anilistPage) }
+          : { status: 404, body: "" },
+      sourcesHandler: (q) => {
+        if (q.kind !== "indexer_search") return [];
+        asked.push(String(q.query));
+        // "v02" finds only the spin-off; the publisher release answers "Series 2".
+        if (String(q.query).endsWith("v02")) {
+          return [1, 2, 3].map((n) => ({
+            title: `Attack on Titan - Before the Fall v02 (2017) (Digital) (r${n}).cbz`,
+            infoHash: String(n).repeat(40),
+          }));
+        }
+        if (String(q.query).endsWith(" 2")) {
+          return [
+            { title: "Kodansha.-.Attack.On.Titan.02.2021.Hybrid.Comic.eBook-BitBook", infoHash: "c".repeat(40) },
+          ];
+        }
+        return [];
+      },
+    });
+    const vols = call("/ether/v1/kinds/comics/browse", { parentId: "al53390", limit: 50 }).body
+      .items as KindItem[];
+    call("/ether/v1/kinds/comics/resolve", { item: vols[1] });
+    assert.ok(asked.length >= 2, `only searched ${JSON.stringify(asked)}`);
+    assert.ok(asked.includes("Attack on Titan 2"), JSON.stringify(asked));
+  });
+
+  it("drops a cached pick the current matcher rejects and searches again", () => {
+    let searched = 0;
+    installMockHost({
+      settings: { enable_manga: true, enable_mangaupdates: false, manga_titles: 20 },
+      httpHandler: (req) =>
+        req.url.includes("graphql.anilist.co")
+          ? { status: 200, body: JSON.stringify(anilistPage) }
+          : { status: 404, body: "" },
+      sourcesHandler: (q) => {
+        if (q.kind === "indexer_search") {
+          searched++;
+          return [
+            { title: "Attack on Titan v02 (2012) (Digital) (danke-Empire).cbz", infoHash: "b".repeat(40), size: 2e8 },
+          ];
+        }
+        return [];
+      },
+    });
+    const vols = call("/ether/v1/kinds/comics/browse", { parentId: "al53390", limit: 50 }).body
+      .items as KindItem[];
+    // A pick an older matcher made and cached: the spin-off series.
+    storePreparedSources(
+      `src:volume:${vols[1].id}`,
+      [
+        {
+          id: "old",
+          label: "CBZ",
+          pattern: "release",
+          mime: "application/vnd.comicbook+zip",
+          release: {
+            infoHash: "a".repeat(40),
+            candidate: { title: "Attack on Titan - Before the Fall v02 (2017) (Digital).cbz", infoHash: "a".repeat(40) },
+          },
+        },
+      ],
+      1800,
+    );
+    const res = call("/ether/v1/kinds/comics/resolve", { item: vols[1] }).body as {
+      sources: Array<{ release?: { candidate?: { title?: string } } }>;
+    };
+    assert.ok(searched > 0, "the stale pick was reused instead of searching again");
+    assert.ok(
+      res.sources.every((x) => !/Before the Fall/.test(x.release?.candidate?.title || "")),
+      JSON.stringify(res.sources),
+    );
+  });
+});
+

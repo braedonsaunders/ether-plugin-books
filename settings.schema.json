@@ -112,6 +112,94 @@
           "default": ""
         }
       ]
+    },
+    {
+      "key": "comics",
+      "kind": "group",
+      "label": "$t:settings.group.comics",
+      "fields": [
+        {
+          "key": "enable_manga",
+          "kind": "bool",
+          "label": "$t:settings.enable_manga.label",
+          "hint": "$t:settings.enable_manga.help",
+          "default": true
+        },
+        {
+          "key": "manga_titles",
+          "kind": "number",
+          "label": "$t:settings.manga_titles.label",
+          "hint": "$t:settings.manga_titles.help",
+          "default": 100,
+          "min": 20,
+          "max": 1000
+        },
+        {
+          "key": "manga_order",
+          "kind": "select",
+          "label": "$t:settings.manga_order.label",
+          "hint": "$t:settings.manga_order.help",
+          "default": "popular",
+          "options": [
+            { "value": "popular", "label": "$t:settings.manga_order.popular" },
+            {
+              "value": "trending",
+              "label": "$t:settings.manga_order.trending"
+            },
+            { "value": "newest", "label": "$t:settings.manga_order.newest" }
+          ]
+        },
+        {
+          "key": "include_adult_manga",
+          "kind": "bool",
+          "label": "$t:settings.include_adult_manga.label",
+          "hint": "$t:settings.include_adult_manga.help",
+          "default": false
+        },
+        {
+          "key": "enable_mangaupdates",
+          "kind": "bool",
+          "label": "$t:settings.enable_mangaupdates.label",
+          "hint": "$t:settings.enable_mangaupdates.help",
+          "default": true
+        },
+        {
+          "key": "volumes_per_series",
+          "kind": "number",
+          "label": "$t:settings.volumes_per_series.label",
+          "hint": "$t:settings.volumes_per_series.help",
+          "default": 50,
+          "min": 1,
+          "max": 300
+        },
+        {
+          "key": "metron_username",
+          "kind": "text",
+          "label": "$t:settings.metron_username.label",
+          "hint": "$t:settings.metron_username.help"
+        },
+        {
+          "key": "metron_password",
+          "kind": "secret",
+          "label": "$t:settings.metron_password.label",
+          "hint": "$t:settings.metron_password.help"
+        },
+        {
+          "key": "comic_series",
+          "kind": "list",
+          "label": "$t:settings.comic_series.label",
+          "hint": "$t:settings.comic_series.help"
+        },
+        {
+          "key": "comic_new_weeks",
+          "kind": "number",
+          "label": "$t:settings.comic_new_weeks.label",
+          "hint": "$t:settings.comic_new_weeks.help",
+          "default": 2,
+          "min": 0,
+          "max": 12
+        }
+      ]
     }
   ]
 }
