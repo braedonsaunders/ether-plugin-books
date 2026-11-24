@@ -366,7 +366,7 @@
             "icon": "assets/icon.svg",
             "card": "square",
             "dateDisplay": "year",
-            "experience": "audio",
+            "experience": "listen",
             "tabs": [
               {
                 "key": "home",
